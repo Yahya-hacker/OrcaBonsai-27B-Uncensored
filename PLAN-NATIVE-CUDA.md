@@ -460,7 +460,7 @@ milestone that can be built here — which is fine, because M0 is the right firs
 
 | # | Milestone | Deliverable | Exit criterion | Est. |
 |---|---|---|---|---|
-| **M0** 🟡 | Converter + Tier-1/2 oracles + llama.cpp baseline | `tools/convert.py`, `bonsai/{codec,config,format}.py` | ✅ converter round-trips **byte-exact**, cross-checked against the authors' own `transcode`; ✅ Tier-1 oracle working; ✅ 56 CPU tests green; ⬜ streaming torch reference; ⬜ **llama.cpp baseline on the target machine** | 1–1.5 wk |
+| **M0** 🟡 | Converter + Tier-1/2 oracles + llama.cpp baseline | `tools/convert.py`, `bonsai/{codec,config,format}.py` | ✅ converter round-trips **byte-exact**, cross-checked against the authors' own `transcode`; ✅ Tier-1 oracle working; ✅ 81 CPU tests green; ✅ Tier-2 reference math (R2-R5 covered); ⬜ **llama.cpp baseline on the target machine** | 1–1.5 wk |
 | **M1** ⛔ | K1 GEMV + K3 FWHT | one packed linear on GPU | matches Tier-1 oracle to fp16 tolerance; sm_120 toolchain proven (R12) | 1 wk |
 | **M2** ⛔ | K4, K6, K8, **K9 4-bit KV** + decode path | batch 1, greedy, resident KV | logits match Tier 2; top-1 ≥99% vs Tier 3; **32K context resident in <7.6 GiB**; KV drift measured (R11) | 2.5–3 wk |
 | **M3** ⛔ | K7 ablation + α / layer controls | `--alpha`, `--layers` | `selfcheck` residual ~1e-6 at **129** sites; α=0 reproduces base bit-exactly | 3 d |

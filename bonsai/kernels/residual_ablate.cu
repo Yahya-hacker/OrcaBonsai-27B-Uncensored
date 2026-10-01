@@ -128,3 +128,36 @@ template __global__ void embed_ablate<__nv_bfloat16>(
     const __nv_bfloat16*, const float*, const float*, __nv_bfloat16*, int);
 
 }  // namespace bonsai
+
+// ---------------------------------------------------------------------- host launcher
+namespace bonsai {
+
+void residual_ablate_launch(const void* x, const void* y, const float* r,
+                            const float* alpha, void* out, int tokens, int hidden,
+                            bool bf16, cudaStream_t stream) {
+    const int threads = 1024;                 // hidden 5120 -> 5 elements per thread
+    const size_t smem = (threads / kWarp) * sizeof(float);
+    if (bf16) {
+        residual_add_ablate<__nv_bfloat16><<<tokens, threads, smem, stream>>>(
+            (const __nv_bfloat16*)x, (const __nv_bfloat16*)y, r, alpha,
+            (__nv_bfloat16*)out, hidden);
+    } else {
+        residual_add_ablate<__half><<<tokens, threads, smem, stream>>>(
+            (const __half*)x, (const __half*)y, r, alpha, (__half*)out, hidden);
+    }
+}
+
+void embed_ablate_launch(const void* e, const float* r, const float* alpha, void* out,
+                         int tokens, int hidden, bool bf16, cudaStream_t stream) {
+    const int threads = 1024;
+    const size_t smem = (threads / kWarp) * sizeof(float);
+    if (bf16) {
+        embed_ablate<__nv_bfloat16><<<tokens, threads, smem, stream>>>(
+            (const __nv_bfloat16*)e, r, alpha, (__nv_bfloat16*)out, hidden);
+    } else {
+        embed_ablate<__half><<<tokens, threads, smem, stream>>>(
+            (const __half*)e, r, alpha, (__half*)out, hidden);
+    }
+}
+
+}  // namespace bonsai

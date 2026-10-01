@@ -125,3 +125,28 @@ template __global__ void ternary_gemv<__nv_bfloat16>(
     const uint8_t*, const __half*, const __nv_bfloat16*, __nv_bfloat16*, int, int);
 
 }  // namespace bonsai
+
+// ---------------------------------------------------------------------- host launcher
+namespace bonsai {
+
+void ternary_gemv_launch(const uint8_t* codes, const void* scales, const void* x,
+                         void* y, int rows, int in_features, bool bf16,
+                         cudaStream_t stream) {
+    // One warp per output row; 8 warps per block keeps occupancy reasonable while the
+    // whole activation vector fits in shared memory (5120 floats = 20 KB).
+    const int threads = 256;
+    const int warps = threads / kWarp;
+    const int blocks = (rows + warps - 1) / warps;
+    const size_t smem = (size_t)in_features * sizeof(float);
+    if (bf16) {
+        ternary_gemv<__nv_bfloat16><<<blocks, threads, smem, stream>>>(
+            codes, (const __half*)scales, (const __nv_bfloat16*)x,
+            (__nv_bfloat16*)y, rows, in_features);
+    } else {
+        ternary_gemv<__half><<<blocks, threads, smem, stream>>>(
+            codes, (const __half*)scales, (const __half*)x,
+            (__half*)y, rows, in_features);
+    }
+}
+
+}  // namespace bonsai

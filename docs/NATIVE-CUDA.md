@@ -4,7 +4,8 @@ A ground-up CUDA/PyTorch runtime for Ternary Bonsai 2 27B with the refusal ablat
 fused into the engine, targeting a **fluent agentic experience on an 8 GB RTX**.
 
 Design rationale, budgets and the full risk register live in
-[`PLAN-NATIVE-CUDA.md`](../PLAN-NATIVE-CUDA.md). This file is what to actually run.
+[`PLAN-NATIVE-CUDA.md`](../PLAN-NATIVE-CUDA.md). Toolchain setup and compile
+instructions are in [`BUILDING-CUDA.md`](BUILDING-CUDA.md). This file is what to run.
 
 ---
 
@@ -12,14 +13,14 @@ Design rationale, budgets and the full risk register live in
 
 | Milestone | State |
 |---|---|
-| **M0** converter, container, oracles | **in progress — codec, container and converter done and tested** |
-| M1 GEMV + FWHT kernels | reference CUDA written, never compiled |
+| **M0** converter, container, oracles | **codec, container, converter and Tier-2 reference done and tested** |
+| M1 GEMV + FWHT kernels | reference CUDA + build system written, never compiled |
 | M2 decode path + 4-bit KV | not started |
 | M3 fused ablation | reference CUDA written, semantics verified on CPU |
 | M4 prefill + prefix cache | not started |
 | M5–M6 perf, packaging | not started |
 
-**56 tests pass on CPU with numpy alone.** No GPU was available while authoring, so
+**81 tests pass on CPU with numpy alone.** No GPU was available while authoring, so
 nothing in `bonsai/kernels/` has been compiled. Everything that *could* be verified
 without a GPU has been, including the kernels' index and bit arithmetic — see
 `tests/test_kernel_semantics.py`, which reimplements the device functions in numpy and
@@ -116,7 +117,7 @@ the model is 17408×5120 and reconstructs in about a second.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-native.txt
-pytest tests/ -q          # 56 tests, CPU only, no model files needed
+pytest tests/ -q          # 81 tests, CPU only, no model files needed
 ```
 
 `bonsai/` (native) and `bonsai_abliterate/` (the original MLX path) coexist. Nothing in
