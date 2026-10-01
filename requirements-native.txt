@@ -1,0 +1,14 @@
+# Native CUDA runtime (x86-64 + NVIDIA). Separate from requirements.txt, which pins the
+# original Apple-Silicon MLX path and is untouched.
+#
+# sm_120 (Blackwell: RTX 50-series) needs CUDA 12.8+ and a matching torch build:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# An older stack fails at RUNTIME with "no kernel image is available", not at build.
+
+numpy>=1.26
+torch>=2.7            # cu128 or newer for sm_120
+tokenizers>=0.20
+safetensors>=0.4
+
+# dev
+pytest>=8.0
