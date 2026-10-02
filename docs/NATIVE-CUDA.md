@@ -13,14 +13,14 @@ instructions are in [`BUILDING-CUDA.md`](BUILDING-CUDA.md). This file is what to
 
 | Milestone | State |
 |---|---|
-| **M0** converter, container, oracles | **codec, container, converter and Tier-2 reference done and tested** |
+| **M0** converter, container, oracles | **done** — codec, container, converter, Tier-2 reference |
 | M1 GEMV + FWHT kernels | reference CUDA + build system written, never compiled |
-| M2 decode path + 4-bit KV | not started |
-| M3 fused ablation | reference CUDA written, semantics verified on CPU |
+| **M2** decode path + 4-bit KV | **KV cache done and tested**; model wiring outstanding |
+| **M3** fused ablation | **policy done and tested**; reference CUDA written |
 | M4 prefill + prefix cache | not started |
 | M5–M6 perf, packaging | not started |
 
-**81 tests pass on CPU with numpy alone.** No GPU was available while authoring, so
+**140 tests pass on CPU with numpy alone.** No GPU was available while authoring, so
 nothing in `bonsai/kernels/` has been compiled. Everything that *could* be verified
 without a GPU has been, including the kernels' index and bit arithmetic — see
 `tests/test_kernel_semantics.py`, which reimplements the device functions in numpy and
@@ -28,21 +28,21 @@ checks them against the reference codec.
 
 ---
 
-## Step 1 — tell us about your machine
+## Step 1 — run the doctor
 
-Two commands, one minute, no downloads. They resolve the last open variables in the
-memory budget (§0 of the plan): real memory bandwidth, PCIe generation, and how much
-VRAM your display is already holding.
+One command, no downloads, safe with or without a GPU. It resolves every variable the
+memory budget currently assumes — real bandwidth, PCIe generation, VRAM already held by
+the display — and then prints the resident-context budget and projected decode rate
+**for your machine** rather than for a datasheet.
 
 ```bash
-nvidia-smi --query-gpu=name,memory.total,memory.used,pcie.link.gen.current,pcie.link.width.current --format=csv
-nvidia-smi --query-gpu=clocks.max.memory --format=csv
-python -c "import torch;print(torch.__version__, torch.cuda.get_device_capability())"
+python tools/doctor.py -o doctor.json
 ```
 
-Expected on the target: `(12, 0)` — Blackwell sm_120, which needs **CUDA 12.8+** and
-**PyTorch 2.7+/cu128**. An older stack fails at *runtime* with `no kernel image is
-available for execution on the device`, not at build time (R12).
+It also catches the one blocking toolchain problem up front: Blackwell is `sm_120` and
+needs **CUDA 12.8+** with **PyTorch 2.7+/cu128**. An older stack fails at *runtime* with
+`no kernel image is available for execution on the device`, which never mentions the
+real cause (R12). See [`BUILDING-CUDA.md`](BUILDING-CUDA.md).
 
 ## Step 2 — get the right GGUF
 
@@ -117,7 +117,7 @@ the model is 17408×5120 and reconstructs in about a second.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-native.txt
-pytest tests/ -q          # 81 tests, CPU only, no model files needed
+pytest tests/ -q          # 140 tests, CPU only, no model files needed
 ```
 
 `bonsai/` (native) and `bonsai_abliterate/` (the original MLX path) coexist. Nothing in
@@ -136,3 +136,38 @@ and `tests/` asserts all three:
 Three traps encoded there rather than left to memory: the doubled `q_proj` whose second
 half is a sigmoid output gate; the GDN `inv²` on q against `inv` on k; and the GGUF
 value-head permutation, which applies to six tensors but **not** to `ssm_out`.
+
+
+---
+
+## The KV cache, and why it is the whole project
+
+Decode re-reads the **entire** KV cache every token. At fp16 this model costs 64 KiB
+per token across its 16 full-attention layers, so 32K context is 2 GiB — which does not
+fit on an 8 GB card beside 5.53 GiB of weights, and therefore has to live in system RAM.
+Over PCIe that caps decode at roughly **6 tok/s at 32K** and under **2 tok/s at 262K**,
+against ~15 ms to read every weight in the model. KV traffic, not weight traffic, is the
+bottleneck.
+
+`bonsai/kvcache.py` removes it:
+
+| | fp16 | this |
+|---|---|---|
+| bits/value | 16 | **4.75** (K group 32, V group 64, asymmetric) |
+| bytes/token | 64 KiB | **19 KiB** |
+| resident on 8 GB | ~21K tokens | **~82K tokens** |
+| decode at 32K | ~6 tok/s (offloaded) | **~28 tok/s** (resident) |
+
+**K is quantised more finely than V.** K errors perturb attention *logits*, which are
+then exponentiated, so they compound; V errors enter the output linearly and partly
+average out. Group 32 for K and 64 for V costs 5% more memory than a uniform group-64
+cache and measurably protects the logits.
+
+**Group 128 is a trap.** It saves 0.25 bits and loses ~80% more accuracy once outlier
+channels are present — and attention K/V genuinely have them. Measured, not assumed.
+
+**~10% elementwise error is inherent to int4**, not a defect: 16 levels across a group's
+min-max span puts the RMS error at `span/15/sqrt(12) ≈ 0.11σ`. It is survivable because
+softmax is contractive and the most recent 128 tokens stay in fp16 — but it is not
+self-evidently fine, and R11 stands: measure perplexity and needle-retrieval on the real
+model before trusting it. `kvcache.measure_error()` exists for exactly that.

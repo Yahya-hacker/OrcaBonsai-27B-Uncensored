@@ -168,3 +168,96 @@ def test_ablation_is_linear_in_alpha(direction, alpha):
     h = ablate(x, y, direction, alpha)
     expected = y - alpha * (y @ direction)[:, None] * direction
     np.testing.assert_allclose(h, expected, rtol=1e-5, atol=1e-6)
+
+
+# --------------------------------------------------- fwht.cu butterfly index math
+
+def kernel_fwht(vec: np.ndarray) -> np.ndarray:
+    """Mirror of rmsnorm_sign_fwht's butterfly loop, including the lo/hi index split.
+
+    The kernel gives thread ``tid`` butterfly ``tid`` at every stage and derives the
+    pair as ``lo = (tid // h) * 2h + (tid % h)``, ``hi = lo + h``. If that split is
+    wrong the transform is still *a* linear map -- plausible numbers, wrong model --
+    so it is worth checking against a dense Hadamard matrix.
+    """
+    n = len(vec)
+    buf = vec.astype(np.float64).copy()
+    h = 1
+    while h < n:
+        new = buf.copy()
+        for tid in range(n // 2):
+            lo = (tid // h) * 2 * h + (tid % h)
+            hi = lo + h
+            a, b = buf[lo], buf[hi]
+            new[lo], new[hi] = a + b, a - b
+        buf = new
+        h <<= 1
+    return (buf / np.sqrt(n)).astype(np.float32)
+
+
+@pytest.mark.parametrize("n", [8, 64, 1024])
+def test_kernel_butterfly_indexing_touches_every_pair_once(n):
+    h = 1
+    while h < n:
+        pairs = [((tid // h) * 2 * h + (tid % h)) for tid in range(n // 2)]
+        pairs += [p + h for p in pairs]
+        assert sorted(pairs) == list(range(n)), f"stage h={h} does not partition"
+        h <<= 1
+
+
+@pytest.mark.parametrize("n", [8, 64, 1024])
+def test_kernel_fwht_matches_dense_hadamard(n):
+    H = np.array([[1.0]])
+    while H.shape[0] < n:
+        H = np.block([[H, H], [H, -H]])
+    rng = np.random.default_rng(21)
+    x = rng.standard_normal(n).astype(np.float32)
+    np.testing.assert_allclose(kernel_fwht(x), (H @ x) / np.sqrt(n),
+                               rtol=1e-4, atol=1e-4)
+
+
+def test_kernel_fwht_matches_the_reference_implementation():
+    from bonsai import reference as ref
+    rng = np.random.default_rng(22)
+    x = rng.standard_normal(1024).astype(np.float32)
+    np.testing.assert_allclose(kernel_fwht(x), ref.fwht(x[None, :], 1024)[0],
+                               rtol=1e-4, atol=1e-4)
+
+
+# ----------------------------------------------- gdn_step.cu head sharing + decay
+
+def test_gdn_kernel_head_sharing_matches_the_reference():
+    """khead = head // (nv/nk): 3 value heads per key head. Off here and 2/3 of the
+    heads read the wrong key."""
+    from bonsai.config import DEFAULT
+    nv, nk = DEFAULT.linear_num_value_heads, DEFAULT.linear_num_key_heads
+    kernel = [h // (nv // nk) for h in range(nv)]
+    reference = np.repeat(np.arange(nk), nv // nk).tolist()
+    assert kernel == reference
+    assert len(set(kernel)) == nk
+
+
+def test_gdn_kernel_softplus_branch_is_continuous():
+    """The kernel uses x for x>20 and log1p(exp(x)) below; the seam must not jump."""
+    for x in (19.999, 20.0, 20.001):
+        sp = x if x > 20.0 else np.log1p(np.exp(x))
+        assert abs(sp - np.logaddexp(x, 0.0)) < 1e-5
+
+
+# ---------------------------------------------------- kv_quant.cu nibble ordering
+
+def test_kv_kernel_nibble_packing_matches_numpy():
+    """Lane i owns byte i = elements 2i and 2i+1, low nibble first."""
+    from bonsai import kvcache
+    rng = np.random.default_rng(23)
+    x = rng.standard_normal((1, 64)).astype(np.float32)
+    codes, scale, zero = kvcache.quantize(x, group=64, symmetric=False)
+
+    s, z = float(scale[0, 0]), float(zero[0, 0])
+    expected = np.clip(np.rint((x[0] - z) / s), 0, 15).astype(np.uint8)
+    got = np.empty(64, np.uint8)
+    for i in range(32):                      # the kernel's per-lane byte assembly
+        byte = codes[0, 0, i]
+        got[2 * i] = byte & 0x0F
+        got[2 * i + 1] = byte >> 4
+    np.testing.assert_array_equal(got, expected)

@@ -20,7 +20,8 @@ import os
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-SOURCES = ["bindings.cpp", "ternary_gemv.cu", "residual_ablate.cu"]
+SOURCES = ["bindings.cpp", "ternary_gemv.cu", "residual_ablate.cu",
+           "fwht.cu", "gdn_step.cu", "kv_quant.cu"]
 
 #: Blackwell consumer (RTX 50-series, including the 5060 Laptop) is sm_120.
 #: compute_120 PTX is emitted alongside so a future architecture can JIT forward.
