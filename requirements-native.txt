@@ -12,3 +12,6 @@ safetensors>=0.4
 
 # dev
 pytest>=8.0
+
+# tokenizer / chat template only; no model weights are loaded through it
+transformers>=4.44

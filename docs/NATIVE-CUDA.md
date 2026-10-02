@@ -3,9 +3,9 @@
 A ground-up CUDA/PyTorch runtime for Ternary Bonsai 2 27B with the refusal ablation
 fused into the engine, targeting a **fluent agentic experience on an 8 GB RTX**.
 
-Design rationale, budgets and the full risk register live in
-[`PLAN-NATIVE-CUDA.md`](../PLAN-NATIVE-CUDA.md). Toolchain setup and compile
-instructions are in [`BUILDING-CUDA.md`](BUILDING-CUDA.md). This file is what to run.
+**To actually run the model, start at [`RUNNING.md`](RUNNING.md).** Toolchain setup and
+compile instructions are in [`BUILDING-CUDA.md`](BUILDING-CUDA.md); design rationale,
+budgets and the risk register are in [`PLAN-NATIVE-CUDA.md`](../PLAN-NATIVE-CUDA.md).
 
 ---
 
@@ -13,14 +13,20 @@ instructions are in [`BUILDING-CUDA.md`](BUILDING-CUDA.md). This file is what to
 
 | Milestone | State |
 |---|---|
-| **M0** converter, container, oracles | **done** — codec, container, converter, Tier-2 reference |
-| M1 GEMV + FWHT kernels | reference CUDA + build system written, never compiled |
-| **M2** decode path + 4-bit KV | **KV cache done and tested**; model wiring outstanding |
-| **M3** fused ablation | **policy done and tested**; reference CUDA written |
-| M4 prefill + prefix cache | not started |
+| **M0** converter, container, oracles | **done** |
+| **M1** kernels | reference CUDA + build system written, **never compiled** |
+| **M2** decode path + 4-bit KV | **done** — engine runs end to end on the portable torch path |
+| **M3** runtime ablation | **done** — policy, engine wiring and CLI |
+| M4 prefill + prefix cache | chunked GDN prefill outstanding |
 | M5–M6 perf, packaging | not started |
 
-**140 tests pass on CPU with numpy alone.** No GPU was available while authoring, so
+**The engine runs today without any compiled kernel.** `python tools/smoke_test.py`
+builds a miniature real model and takes it through prefill, incremental decode,
+generation and the ablation. Compiling the kernels is a throughput change with a
+parity test attached — not the step that decides whether anything works.
+See [`RUNNING.md`](RUNNING.md).
+
+**164 tests pass on CPU** (numpy for the core, torch for the engine). No GPU was available while authoring, so
 nothing in `bonsai/kernels/` has been compiled. Everything that *could* be verified
 without a GPU has been, including the kernels' index and bit arithmetic — see
 `tests/test_kernel_semantics.py`, which reimplements the device functions in numpy and
@@ -117,7 +123,7 @@ the model is 17408×5120 and reconstructs in about a second.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-native.txt
-pytest tests/ -q          # 140 tests, CPU only, no model files needed
+pytest tests/ -q          # 164 tests, CPU only, no model files needed
 ```
 
 `bonsai/` (native) and `bonsai_abliterate/` (the original MLX path) coexist. Nothing in
